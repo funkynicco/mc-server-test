@@ -23,8 +23,8 @@ namespace MC_Server_Test.Network
 
             return (long)(value >> 1);
         }*/
-
-        private int GetVarIntBytes(long value, byte[] buffer, int offset)
+        
+        protected int GetVarIntBytes(long value, byte[] buffer, int offset)
         {
             var baseOffset = offset; // used as mathematical reference only
 
@@ -47,7 +47,7 @@ namespace MC_Server_Test.Network
             return offset - baseOffset;
         }
 
-        private long InternalReadVarInt(int bits)
+        protected long InternalReadVarInt(int bits)
         {
             var shift = 0;
             var result = 0L;

@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using System.Net.Sockets;
 using System.IO;
 using System.Reflection;
+using System.Runtime.ExceptionServices;
 
 namespace MC_Server_Test.Minecraft
 {
@@ -24,13 +25,13 @@ namespace MC_Server_Test.Minecraft
             }
         }
 
-        private readonly Dictionary<InHeader, PacketMethod>[] _packetMethods;
+        private readonly Dictionary<int, PacketMethod>[] _packetMethods;
 
         public Server()
         {
-            _packetMethods = new Dictionary<InHeader, PacketMethod>[4];
+            _packetMethods = new Dictionary<int, PacketMethod>[4];
             for (int i = 0; i < _packetMethods.Length; ++i)
-                _packetMethods[i] = new Dictionary<InHeader, PacketMethod>();
+                _packetMethods[i] = new Dictionary<int, PacketMethod>();
 
             foreach (var method in GetType().GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
             {
@@ -49,7 +50,7 @@ namespace MC_Server_Test.Minecraft
                         Console.ForegroundColor = ConsoleColor.Gray;
                     }
 
-                    _packetMethods[(int)attribute.State].Add(attribute.Header, new PacketMethod(attribute, method));
+                    _packetMethods[(int)attribute.State].Add((int)attribute.Header, new PacketMethod(attribute, method));
                 }
             }
         }
@@ -66,12 +67,19 @@ namespace MC_Server_Test.Minecraft
 
         protected override void OnClientConnected(User user)
         {
+            Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"Connection from {user.IP}");
+            Console.ForegroundColor = ConsoleColor.Gray;
         }
 
         protected override void OnClientDisconnected(User user)
         {
-            Console.WriteLine($"{user.IP} disconnected");
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            if (!string.IsNullOrWhiteSpace(user.DisconnectMessage))
+                Console.WriteLine($"{user.IP} disconnected: {user.DisconnectMessage}");
+            else
+                Console.WriteLine($"{user.IP} disconnected");
+            Console.ForegroundColor = ConsoleColor.Gray;
         }
 
         protected override void OnClientData(User user, byte[] buffer, int offset, int length)
@@ -123,56 +131,91 @@ namespace MC_Server_Test.Minecraft
             }
             #endregion
 
-            user.Buffer.Offset = 0;
-
-            var packet_length = user.Buffer.ReadVarInt();
-
-            if (user.Buffer.Length - user.Buffer.Offset < packet_length)
+            while (user.Buffer.Length > 0)
             {
-                // need more data
-                Console.WriteLine("ERR need more data");
-                return;
-            }
+                user.Buffer.Offset = 0;
 
-            Console.WriteLine($"Ofs1: {user.Buffer.Offset}");
-            var ofs = user.Buffer.Offset;
-            var packet_id = (byte)user.Buffer.ReadVarInt();
-            Console.WriteLine($"Ofs1: {user.Buffer.Offset}");
-            Console.WriteLine($"[Packet] Length: {packet_length} - Id: 0x{packet_id.ToString("x2")}");
+                int packet_length;
 
-            if (user.Buffer.Length - ofs >= packet_length)
-                Console.Write("OK FULL PACKET ");
-            else
-                Console.Write("NOT FULL PACKET! ");
+                try
+                {
+                    packet_length = (int)user.Buffer.ReadVarInt();
+                }
+                catch (EndOfBufferException)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("ERR1 need more data");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    return;
+                }
 
-            Console.WriteLine($"remain: {user.Buffer.Length - ofs}");
-            Console.WriteLine();
+                if (user.Buffer.Length - user.Buffer.Offset < packet_length)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("ERR2 need more data");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    return;
+                }
 
-            if (packet_id == 0x00)
-            {
-                var version = user.Buffer.ReadVarInt();
-                var host = user.Buffer.ReadString();
-                var port = user.Buffer.ReadInt16();
-                var nextState = user.Buffer.ReadVarInt();
+                var packet_id_offset = user.Buffer.Offset; // this is how many bytes the packet_id was
 
-                Console.WriteLine("-- Version: " + version);
-                Console.WriteLine("-- Host: " + host);
-                Console.WriteLine("-- Port: " + port);
-                Console.WriteLine("-- NextState: " + nextState);
+                int packet_id;
+                try
+                {
+                    packet_id = (int)user.Buffer.ReadVarInt();
+                }
+                catch (EndOfBufferException)
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("ERR3 need more data");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    return;
+                }
 
-                Console.WriteLine("REM: " + (user.Buffer.Length - user.Buffer.Offset));
+                if (user.Buffer.Length - packet_id_offset < packet_length) // packet has not fully received yet
+                {
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("ERR4 need more data");
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                    return;
+                }
 
-                var json = File.ReadAllText("serverlist.txt");
-                var data_buf = new DataBuffer();
-                data_buf.WriteVarInt(0x00); // packet id
-                data_buf.Write(json);
+                PacketMethod method;
+                if (!_packetMethods[(int)user.State].TryGetValue(packet_id, out method))
+                {
+                    user.Disconnect("Invalid packet id => 0x" + packet_id.ToString("x2"));
+                    return;
+                }
 
-                var buf = new DataBuffer();
-                buf.WriteVarInt(data_buf.Length); // length
-                buf.Write(data_buf.InternalBuffer, 0, data_buf.Length);
-                user.Socket.Send(buf.InternalBuffer, 0, buf.Length, SocketFlags.None);
+                Console.ForegroundColor = ConsoleColor.Cyan;
+                Console.WriteLine($"[Packet/{user.State}] Id: 0x{packet_id.ToString("x2")} - Length: {packet_length} - Method => {method.Method.Name}");
+                Console.ForegroundColor = ConsoleColor.Gray;
 
-                user.Buffer.Reset();
+                try
+                {
+                    method.Method.Invoke(this, new object[] { user });
+                }
+                catch (TargetInvocationException ex)
+                {
+                    if (ex.InnerException is EndOfBufferException)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine("End of buffer exception");
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                    }
+                    else if (ex.InnerException is ProtocolException)
+                    {
+                        Console.ForegroundColor = ConsoleColor.Red;
+                        Console.WriteLine($"[{user.IP}] (ProtocolException) {ex.InnerException.Message} in {method.Method.Name}");
+                        Console.ForegroundColor = ConsoleColor.Gray;
+                        user.Disconnect("Protocol exception: " + ex.InnerException.Message);
+                        return;
+                    }
+
+                    ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                }
+
+                user.Buffer.Remove(packet_id_offset + packet_length);
             }
         }
     }

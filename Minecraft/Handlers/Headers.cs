@@ -54,6 +54,10 @@ namespace MC_Server_Test.Minecraft
     {
         //Server to client
 
+        // State: handshake
+        ServerListPing = 0x00,
+        Ping = 0x01,
+
         // State: Login  
         EncryptionRequest = 0x01,
         LoginSuccess = 0x02,

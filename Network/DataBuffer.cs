@@ -71,7 +71,7 @@ namespace MC_Server_Test.Network
         /// Gets or sets the offset within the internal buffer for reading.
         /// <para>The offset must be between 0 and DataBuffer.Length</para>
         /// </summary>
-        public int Offset
+        public virtual int Offset
         {
             get { return _offset; }
             set
@@ -87,7 +87,7 @@ namespace MC_Server_Test.Network
         /// <summary>
         /// Gets the amount of bytes contained in the internal buffer.
         /// </summary>
-        public int Length { get { return _length; } }
+        public virtual int Length { get { return _length; } }
 
         /// <summary>
         /// Allocates an internal buffer to use for reading or writing.
@@ -108,17 +108,20 @@ namespace MC_Server_Test.Network
             _isReadOnly = true;
         }
 
+        protected virtual void OnDataChanged() { } // just an overridable function for determining when data was changed
+
         /// <summary>
         /// Resets the reading offset and the length (if not in read-only mode) of the buffer.
         /// </summary>
-        public void Reset()
+        public virtual void Reset()
         {
             _offset = 0;
             if (!_isReadOnly)
                 _length = 0;
+            OnDataChanged();
         }
 
-        public void Remove(int bytes)
+        public virtual void Remove(int bytes)
         {
             if (_isReadOnly)
                 throw new InvalidOperationException("Cannot modify a read-only buffer.");
@@ -137,6 +140,8 @@ namespace MC_Server_Test.Network
             _length -= bytes;
             if (_offset < 0)
                 _offset = 0;
+
+            OnDataChanged();
         }
 
         private void CheckSize(int add)
@@ -309,6 +314,8 @@ namespace MC_Server_Test.Network
             _offset += length;
             if (_offset > _length)
                 _length = _offset;
+
+            OnDataChanged();
         }
 
         public void Write(byte[] buffer)
@@ -325,6 +332,8 @@ namespace MC_Server_Test.Network
             _buffer[_offset++] = value;
             if (_offset > _length)
                 _length = _offset;
+
+            OnDataChanged();
         }
 
         public void Write(bool value)
@@ -347,6 +356,8 @@ namespace MC_Server_Test.Network
 #endif
             if (_offset > _length)
                 _length = _offset;
+
+            OnDataChanged();
         }
 
         public void Write(int value)
@@ -368,6 +379,8 @@ namespace MC_Server_Test.Network
 #endif
             if (_offset > _length)
                 _length = _offset;
+
+            OnDataChanged();
         }
 
         public void Write(long value)
@@ -397,6 +410,8 @@ namespace MC_Server_Test.Network
 #endif
             if (_offset > _length)
                 _length = _offset;
+
+            OnDataChanged();
         }
 
         public void Write(string value)
