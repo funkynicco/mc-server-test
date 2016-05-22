@@ -43,6 +43,10 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Minecraft\Handlers\Handshake.cs" />
+    <Compile Include="Minecraft\Handlers\Status.cs" />
+    <Compile Include="Minecraft\Server.cs" />
+    <Compile Include="Minecraft\User.cs" />
     <Compile Include="Network\BaseClient.cs" />
     <Compile Include="Network\DataBuffer.cs" />
     <Compile Include="Network\DataBufferVarIntExtensions.cs" />

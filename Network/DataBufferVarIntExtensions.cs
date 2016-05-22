@@ -11,7 +11,7 @@ namespace MC_Server_Test.Network
         // zigzag is used when the number is signed to determine positive or negative value
         // NOTE: zigzag is probably NOT used in minecraft protocol!
 
-        private long EncodeZigZag(long value, int bitLength)
+        /*private long EncodeZigZag(long value, int bitLength)
         {
             return (value << 1) ^ (value >> (bitLength - 1));
         }
@@ -22,42 +22,41 @@ namespace MC_Server_Test.Network
                 return (-1 * ((long)(value >> 1) + 1));
 
             return (long)(value >> 1);
-        }
+        }*/
 
-        private byte[] GetVarULongBytes(ulong value)
+        private int GetVarIntBytes(long value, byte[] buffer, int offset)
         {
-            var buffer = new byte[10];
-            var pos = 0;
+            var baseOffset = offset; // used as mathematical reference only
+
             do
             {
+                if (offset >= buffer.Length)
+                    throw new OverflowException($"Buffer provided was too small to contain the VarInt bytes of {value}");
+
                 var byteVal = value & 0x7f; // gets all bits except highest bit
                 value >>= 7;
 
                 if (value != 0)
                     byteVal |= 0x80;
 
-                buffer[pos++] = (byte)byteVal;
+                buffer[offset++] = (byte)byteVal;
 
             }
             while (value != 0);
-
-            var result = new byte[pos];
-            Buffer.BlockCopy(buffer, 0, result, 0, pos);
-
-            return result;
+            
+            return offset - baseOffset;
         }
 
-        private ulong InternalReadVarUInt(int bits)
+        private long InternalReadVarInt(int bits)
         {
             var shift = 0;
-            var result = 0UL;
+            var result = 0L;
 
             while (true)
             {
-                var byteValue = (ulong)ReadByte();
+                var byteValue = (long)ReadByte();
 
-                ulong tmp = byteValue & 0x7f;
-                result |= tmp << shift;
+                result |= (byteValue & 0x7f) << shift;
 
                 if (shift > bits)
                     throw new InvalidOperationException("Too many bytes were read in decoding the VarInt (corrupted data?).");
@@ -69,11 +68,6 @@ namespace MC_Server_Test.Network
             }
 
             return result;
-        }
-
-        private long InternalReadVarInt(int bits)
-        {
-            return DecodeZigZag(InternalReadVarUInt(bits));
         }
     }
 }

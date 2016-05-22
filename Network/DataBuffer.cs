@@ -1,4 +1,6 @@
-﻿using System;
+﻿#define MSB_MODE // reads digits as MSB mode (most significant -bytes- first which is the network standard)
+
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -6,6 +8,12 @@ using System.Threading.Tasks;
 
 namespace MC_Server_Test.Network
 {
+    public interface IDataBufferObject
+    {
+        void Serialize(DataBuffer buffer);
+        void Deserialize(DataBuffer buffer);
+    }
+
     public interface IDataWriter
     {
         void Write(byte[] buffer, int offset, int length);
@@ -18,8 +26,8 @@ namespace MC_Server_Test.Network
         void Write(string value);
         void Write(float value);
         void Write(double value);
-        void WriteVarInt(int value);
-        void WriteVarLong(long value);
+        void WriteVarInt(long value);
+        void Serialize(IDataBufferObject obj);
     }
 
     public interface IDataReader
@@ -34,8 +42,8 @@ namespace MC_Server_Test.Network
         string ReadString();
         float ReadSingle();
         double ReadDouble();
-        int ReadVarInt();
-        long ReadVarLong();
+        long ReadVarInt();
+        void Deserialize(IDataBufferObject obj);
     }
 
     public partial class DataBuffer : IDataWriter, IDataReader
@@ -189,9 +197,15 @@ namespace MC_Server_Test.Network
             if (_offset + 2 > _length)
                 throw new EndOfBufferException();
 
+#if MSB_MODE
+            return (short)(
+                _buffer[_offset++] << 8 |
+                _buffer[_offset++]);
+#else
             return (short)(
                 _buffer[_offset++] |
                 _buffer[_offset++] << 8);
+#endif
         }
 
         public int ReadInt32()
@@ -199,11 +213,19 @@ namespace MC_Server_Test.Network
             if (_offset + 4 > _length)
                 throw new EndOfBufferException();
 
+#if MSB_MODE
+            return
+                _buffer[_offset++] << 24 |
+                _buffer[_offset++] << 16 |
+                _buffer[_offset++] << 8 |
+                _buffer[_offset++];
+#else
             return
                 _buffer[_offset++] |
                 _buffer[_offset++] << 8 |
                 _buffer[_offset++] << 16 |
                 _buffer[_offset++] << 24;
+#endif
         }
 
         public long ReadInt64()
@@ -211,6 +233,17 @@ namespace MC_Server_Test.Network
             if (_offset + 8 > _length)
                 throw new EndOfBufferException();
 
+#if MSB_MODE
+            return
+                _buffer[_offset++] << 56 |
+                _buffer[_offset++] << 48 |
+                _buffer[_offset++] << 40 |
+                _buffer[_offset++] << 32 |
+                _buffer[_offset++] << 24 |
+                _buffer[_offset++] << 16 |
+                _buffer[_offset++] << 8 |
+                _buffer[_offset++];
+#else
             return
                 _buffer[_offset++] |
                 _buffer[_offset++] << 8 |
@@ -220,43 +253,52 @@ namespace MC_Server_Test.Network
                 _buffer[_offset++] << 40 |
                 _buffer[_offset++] << 48 |
                 _buffer[_offset++] << 56;
+#endif
         }
 
         public string ReadString()
         {
-            var length = ReadInt32();
+            var length = ReadVarInt();
+            if (length < 0 ||
+                length >= short.MaxValue)
+                throw new Exception("Invalid string length: " + length);
+
             var buffer = new byte[length];
-            ReadBytes(buffer, 0, length);
-            return _encoding.GetString(buffer, 0, length);
+            ReadBytes(buffer, 0, (int)length);
+            return _encoding.GetString(buffer, 0, (int)length);
         }
 
         public float ReadSingle()
         {
-            return BitConverter.ToSingle(ReadBytes(4), 0);
+            var bytes = ReadBytes(4);
+#if MSB_MODE
+            // MAY NOT BE RIGHT!
+            Array.Reverse(bytes);
+#endif
+            return BitConverter.ToSingle(bytes, 0);
         }
 
         public double ReadDouble()
         {
-            return BitConverter.ToDouble(ReadBytes(8), 0);
+            var bytes = ReadBytes(8);
+#if MSB_MODE
+            Array.Reverse(bytes);
+#endif
+            return BitConverter.ToDouble(bytes, 0);
         }
 
-        public int ReadVarInt()
-        {
-            return (int)InternalReadVarInt(32);
-        }
-
-        public int ReadVarUInt()
-        {
-            return (int)InternalReadVarUInt(32);
-        }
-
-        public long ReadVarLong()
+        public long ReadVarInt()
         {
             return InternalReadVarInt(64);
         }
-        #endregion
 
-        #region Write types
+        public void Serialize(IDataBufferObject obj)
+        {
+            obj.Serialize(this);
+        }
+#endregion
+
+#region Write types
         public void Write(byte[] buffer, int offset, int length)
         {
             if (_isReadOnly)
@@ -296,8 +338,13 @@ namespace MC_Server_Test.Network
                 throw new InvalidOperationException("Cannot modify a read-only buffer.");
 
             CheckSize(2);
+#if MSB_MODE
+            _buffer[_offset++] = (byte)(value >> 8);
+            _buffer[_offset++] = (byte)value;
+#else
             _buffer[_offset++] = (byte)value;
             _buffer[_offset++] = (byte)(value >> 8);
+#endif
             if (_offset > _length)
                 _length = _offset;
         }
@@ -308,10 +355,17 @@ namespace MC_Server_Test.Network
                 throw new InvalidOperationException("Cannot modify a read-only buffer.");
 
             CheckSize(4);
+#if MSB_MODE
+            _buffer[_offset++] = (byte)(value >> 24);
+            _buffer[_offset++] = (byte)(value >> 16);
+            _buffer[_offset++] = (byte)(value >> 8);
+            _buffer[_offset++] = (byte)value;
+#else
             _buffer[_offset++] = (byte)value;
             _buffer[_offset++] = (byte)(value >> 8);
             _buffer[_offset++] = (byte)(value >> 16);
             _buffer[_offset++] = (byte)(value >> 24);
+#endif
             if (_offset > _length)
                 _length = _offset;
         }
@@ -322,6 +376,16 @@ namespace MC_Server_Test.Network
                 throw new InvalidOperationException("Cannot modify a read-only buffer.");
 
             CheckSize(8);
+#if MSB_MODE
+            _buffer[_offset++] = (byte)(value >> 56);
+            _buffer[_offset++] = (byte)(value >> 48);
+            _buffer[_offset++] = (byte)(value >> 40);
+            _buffer[_offset++] = (byte)(value >> 32);
+            _buffer[_offset++] = (byte)(value >> 24);
+            _buffer[_offset++] = (byte)(value >> 16);
+            _buffer[_offset++] = (byte)(value >> 8);
+            _buffer[_offset++] = (byte)value;
+#else
             _buffer[_offset++] = (byte)value;
             _buffer[_offset++] = (byte)(value >> 8);
             _buffer[_offset++] = (byte)(value >> 16);
@@ -330,6 +394,7 @@ namespace MC_Server_Test.Network
             _buffer[_offset++] = (byte)(value >> 40);
             _buffer[_offset++] = (byte)(value >> 48);
             _buffer[_offset++] = (byte)(value >> 56);
+#endif
             if (_offset > _length)
                 _length = _offset;
         }
@@ -338,7 +403,7 @@ namespace MC_Server_Test.Network
         {
             var bytes = _encoding.GetBytes(value);
 
-            Write(bytes.Length);
+            WriteVarInt(bytes.Length);
             Write(bytes, 0, bytes.Length);
         }
 
@@ -352,19 +417,18 @@ namespace MC_Server_Test.Network
             Write(BitConverter.GetBytes(value), 0, 8);
         }
 
-        public void WriteVarInt(int value)
+        public void WriteVarInt(long value)
         {
-            var zigzag = EncodeZigZag(value, 32);
-            Write(GetVarULongBytes((ulong)zigzag));
+            var buffer = new byte[10];
+            var count = GetVarIntBytes(value, buffer, 0);
+            Write(buffer, 0, count);
         }
 
-        public void WriteVarLong(long value)
+        public void Deserialize(IDataBufferObject obj)
         {
-            var zigzag = EncodeZigZag(value, 64);
-            Write(GetVarULongBytes((ulong)zigzag));
-
+            obj.Deserialize(this);
         }
-        #endregion
+#endregion
 
         public static DataBuffer FromString(string content, Encoding encoding)
         {
