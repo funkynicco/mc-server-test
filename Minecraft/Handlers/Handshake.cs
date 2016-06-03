@@ -14,18 +14,23 @@ namespace MC_Server_Test.Minecraft
             var version = user.Buffer.ReadVarInt();
             var host = user.Buffer.ReadString();
             var port = user.Buffer.ReadInt16();
-            var nextState = user.Buffer.ReadVarInt();
+            var requestState = user.Buffer.ReadVarInt();
+
+            if (requestState < 0 ||
+                requestState > 3)
+                throw new ProtocolException("NextState must be between 0 and 3");
+
+            var state = (ClientState)requestState;
+            if (state == ClientState.Handshake ||
+                state == ClientState.Play)
+                throw new ProtocolException("Cannot request Handshake or Play state change at this time.");
 
             Console.WriteLine("-- Version: " + version);
             Console.WriteLine("-- Host: " + host);
             Console.WriteLine("-- Port: " + port);
-            Console.WriteLine("-- NextState: " + nextState);
+            Console.WriteLine("-- NextState: " + state);
 
-            if (nextState < 0 ||
-                nextState > 3)
-                throw new ProtocolException("NextState must be between 0 and 3");
-
-            user.State = (ClientState)nextState;
+            user.State = state;
         }
     }
 }

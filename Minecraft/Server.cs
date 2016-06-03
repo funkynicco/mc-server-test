@@ -157,7 +157,7 @@ namespace MC_Server_Test.Minecraft
                     return;
                 }
 
-                var packet_id_offset = user.Buffer.Offset; // this is how many bytes the packet_id was
+                var packet_id_offset = user.Buffer.Offset; // store this to determine how many bytes packet_id took
 
                 int packet_id;
                 try
@@ -172,7 +172,7 @@ namespace MC_Server_Test.Minecraft
                     return;
                 }
 
-                if (user.Buffer.Length - packet_id_offset < packet_length) // packet has not fully received yet
+                if (user.Buffer.Length - packet_id_offset < packet_length) // (REDUNDANT CHECK) packet has not fully received yet
                 {
                     Console.ForegroundColor = ConsoleColor.Yellow;
                     Console.WriteLine("ERR4 need more data");
@@ -181,40 +181,46 @@ namespace MC_Server_Test.Minecraft
                 }
 
                 PacketMethod method;
-                if (!_packetMethods[(int)user.State].TryGetValue(packet_id, out method))
+                if (_packetMethods[(int)user.State].TryGetValue(packet_id, out method))
                 {
-                    user.Disconnect("Invalid packet id => 0x" + packet_id.ToString("x2"));
-                    return;
-                }
+                    Console.ForegroundColor = ConsoleColor.Cyan;
+                    Console.WriteLine($"[Packet/{user.State}] Id: 0x{packet_id.ToString("x2")} - Length: {packet_length} - Method => {method.Method.Name}");
+                    Console.ForegroundColor = ConsoleColor.Gray;
 
-                Console.ForegroundColor = ConsoleColor.Cyan;
-                Console.WriteLine($"[Packet/{user.State}] Id: 0x{packet_id.ToString("x2")} - Length: {packet_length} - Method => {method.Method.Name}");
-                Console.ForegroundColor = ConsoleColor.Gray;
+                    user.Buffer.LockRegion(user.Buffer.Offset, packet_length - (user.Buffer.Offset - packet_id_offset));
 
-                try
-                {
-                    method.Method.Invoke(this, new object[] { user });
-                }
-                catch (TargetInvocationException ex)
-                {
-                    if (ex.InnerException is EndOfBufferException)
+                    try
                     {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine("End of buffer exception");
-                        Console.ForegroundColor = ConsoleColor.Gray;
+                        method.Method.Invoke(this, new object[] { user });
                     }
-                    else if (ex.InnerException is ProtocolException)
+                    catch (TargetInvocationException ex)
                     {
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.WriteLine($"[{user.IP}] (ProtocolException) {ex.InnerException.Message} in {method.Method.Name}");
-                        Console.ForegroundColor = ConsoleColor.Gray;
-                        user.Disconnect("Protocol exception: " + ex.InnerException.Message);
-                        return;
+                        if (ex.InnerException is EndOfBufferException ||
+                            ex.InnerException is RegionLockedException ||
+                            ex.InnerException is ProtocolException)
+                        {
+                            Console.ForegroundColor = ConsoleColor.Red;
+                            Console.WriteLine($"[{user.IP}] ({ex.InnerException.GetType().Name}) {ex.InnerException.Message} in {method.Method.Name}");
+                            Console.ForegroundColor = ConsoleColor.Gray;
+                            ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                            user.Disconnect("Protocol exception: " + ex.InnerException.Message);
+                            return;
+                        }
+
+                        ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
                     }
 
-                    ExceptionDispatchInfo.Capture(ex.InnerException).Throw();
+                    user.Buffer.UnlockRegion();
                 }
-
+                else
+                {
+                    //user.Disconnect("Invalid packet id => 0x" + packet_id.ToString("x2"));
+                    //return;
+                    Console.ForegroundColor = ConsoleColor.Yellow;
+                    Console.WriteLine("Invalid packet id => 0x" + packet_id.ToString("x2"));
+                    Console.ForegroundColor = ConsoleColor.Gray;
+                }
+                
                 user.Buffer.Remove(packet_id_offset + packet_length);
             }
         }

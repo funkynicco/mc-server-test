@@ -49,6 +49,7 @@
     <Compile Include="Minecraft\Handlers\Play.cs" />
     <Compile Include="Minecraft\Handlers\Status.cs" />
     <Compile Include="Minecraft\MinePacket.cs" />
+    <Compile Include="Minecraft\ProtocolException.cs" />
     <Compile Include="Minecraft\Server.cs" />
     <Compile Include="Minecraft\User.cs" />
     <Compile Include="Network\BaseClient.cs" />

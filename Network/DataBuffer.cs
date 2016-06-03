@@ -45,15 +45,35 @@ namespace MC_Server_Test.Network
         long ReadVarInt();
         void Deserialize(IDataBufferObject obj);
     }
-
+    
     public partial class DataBuffer : IDataWriter, IDataReader
     {
+        struct ReadableRegion
+        {
+            public int Offset { get; set; }
+            public int Length { get; set; }
+
+            public ReadableRegion(int offset, int length)
+            {
+                Offset = offset;
+                Length = length;
+            }
+
+            public bool Check(int offset, int length)
+            {
+                return
+                    offset >= Offset &&
+                    offset + length <= Offset + Length;
+            }
+        }
+
         public const int MaxSize = 1048576; // 1 MB
 
         private byte[] _buffer = new byte[1024];
         private int _offset = 0;
         private int _length = 0;
         private bool _isReadOnly = false;
+        private ReadableRegion _readableRegion = new ReadableRegion(0, int.MaxValue);
 
         private readonly Encoding _encoding = Encoding.GetEncoding(1252);
 
@@ -109,6 +129,16 @@ namespace MC_Server_Test.Network
         }
 
         protected virtual void OnDataChanged() { } // just an overridable function for determining when data was changed
+
+        public void LockRegion(int offset, int length)
+        {
+            _readableRegion = new ReadableRegion(offset, length);
+        }
+
+        public void UnlockRegion()
+        {
+            _readableRegion = new ReadableRegion(0, int.MaxValue);
+        }
 
         /// <summary>
         /// Resets the reading offset and the length (if not in read-only mode) of the buffer.
@@ -170,6 +200,9 @@ namespace MC_Server_Test.Network
         #region Read types
         public void ReadBytes(byte[] buffer, int offsetInBuffer, int bytesToRead)
         {
+            if (!_readableRegion.Check(_offset, bytesToRead))
+                throw new RegionLockedException();
+
             if (_offset + bytesToRead > _length)
                 throw new EndOfBufferException();
 
@@ -186,6 +219,9 @@ namespace MC_Server_Test.Network
 
         public byte ReadByte()
         {
+            if (!_readableRegion.Check(_offset, 1))
+                throw new RegionLockedException();
+
             if (_offset + 1 > _length)
                 throw new EndOfBufferException();
 
@@ -199,6 +235,9 @@ namespace MC_Server_Test.Network
 
         public short ReadInt16()
         {
+            if (!_readableRegion.Check(_offset, 2))
+                throw new RegionLockedException();
+
             if (_offset + 2 > _length)
                 throw new EndOfBufferException();
 
@@ -215,6 +254,9 @@ namespace MC_Server_Test.Network
 
         public int ReadInt32()
         {
+            if (!_readableRegion.Check(_offset, 4))
+                throw new RegionLockedException();
+
             if (_offset + 4 > _length)
                 throw new EndOfBufferException();
 
@@ -235,6 +277,9 @@ namespace MC_Server_Test.Network
 
         public long ReadInt64()
         {
+            if (!_readableRegion.Check(_offset, 8))
+                throw new RegionLockedException();
+
             if (_offset + 8 > _length)
                 throw new EndOfBufferException();
 
@@ -463,6 +508,14 @@ namespace MC_Server_Test.Network
     {
         public EndOfBufferException() :
             base("An attempt was made to read more bytes than what exists in a DataBuffer.")
+        {
+        }
+    }
+
+    public class RegionLockedException : Exception
+    {
+        public RegionLockedException() :
+            base("Attempt to read bytes from a unlocked region was made. Unlock the region and try again.")
         {
         }
     }
